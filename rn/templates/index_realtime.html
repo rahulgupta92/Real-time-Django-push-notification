@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+
+{% load static %}
+{% load notifications_tags %}
+
+<html>
+<head>
+    <link href="{% static 'css/bootstrap.min.css' %}" rel="stylesheet">
+    <link href="{% static 'css/bootstrap-theme.min.css' %}" rel="stylesheet">
+    <script src="{% static 'js/jquery-2.1.1.min.js' %}"></script>
+    <script src="{% static 'js/bootstrap.min.js' %}"></script>
+    <script src="http://localhost:8002/socket.io/socket.io.js"></script>
+
+    <script>
+        function getCookie(name) {
+            var cookieValue = null;
+
+            if (document.cookie && document.cookie != '') {
+                var cookies = document.cookie.split(';');
+                for (var i = 0; i < cookies.length; i++) {
+                    var cookie = jQuery.trim(cookies[i]);
+                    if (cookie.substring(0, name.length + 1) == (name + '=')) {
+                        cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                        break;
+                    }
+                }
+            }
+
+            return cookieValue;
+        }
+
+        $(document).ready(function() {
+            $("#mark-as-read-button").on("click", function(event) {
+                event.preventDefault();
+
+                $.ajax({
+                    url: "{% url 'ajax_mark_as_read' %}",
+                    type: "POST",
+                    success: function(data) {
+                    },
+                    beforeSend: function(xhr){
+                        var csrftoken = getCookie("csrftoken");
+                        xhr.setRequestHeader('X-CSRFToken', csrftoken);
+                    }
+                });
+            });
+
+            $("#send-notification-button").popover({
+                container: "body",
+                html: true,
+                placement: "right",
+                content: function() {
+                    return $("div.send-notification-popover").html();
+                },
+                trigger: "click"
+            });
+
+            $("body").on("click", "button.send-notification-form-submit", function(event) {
+                event.preventDefault();
+
+                var $send_notification_form = $(event.target).parent();
+
+                $.ajax({
+                    url: "{% url 'ajax_send_notification' %}",
+                    type: "POST",
+                    data: $send_notification_form.serialize(),
+                    success: function(data) {
+                        $("#send-notification-button").popover("hide");
+                    },
+                    beforeSend: function(xhr){
+                        var csrftoken = getCookie("csrftoken");
+                        xhr.setRequestHeader('X-CSRFToken', csrftoken);
+                    }
+                });
+            });
+
+            var socket = io.connect("localhost", {port: 8002});
+
+            socket.on('message', function(message) {
+                var message_json = jQuery.parseJSON(message);
+
+                $("#unread_count").text(message_json.unread_count);
+
+                if ("mark_as_read" in message_json) {
+                    $("#notifications-table tbody").empty();
+                } else {
+                    var $tr = $("<tr>");
+                    $tr.append($("<td>").text(message_json.timestamp));
+                    $tr.append($("<td>").text(message_json.recipient));
+                    $tr.append($("<td>").text(message_json.actor));
+                    $tr.append($("<td>").text(message_json.verb));
+                    $tr.append($("<td>").text(message_json.action_object));
+                    $tr.append($("<td>").text(message_json.target));
+                    $tr.append($("<td>").text(message_json.description));
+
+                    $("#notifications-table tbody").prepend($tr);
+                }
+            });
+        });
+    </script>
+
+    <title>Real-time notifications in Django {% if user.is_authenticated %}({{ user.username }}){% endif %}</title>
+</head>
+<body>
+    <div class="container-fluid">
+        <div class="navbar navbar-default" role="navigation">
+            <div class="container-fluid">
+                <div class="navbar-header">
+                    <a class="navbar-brand" href="#">Real-time Django notifications</a>
+                </div>
+                <div class="navbar-collapse collapse">
+                    <ul class="nav navbar-nav navbar-right">
+                        {% if user.is_authenticated %}
+                        <li><a href="{% url 'logout' %}">Logout</a></li>
+                        {% else %}
+                        <li><a href="{% url 'login' %}">Login</a></li>
+                        {% endif %}
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="container-fluid">
+        <div class="panel panel-default">
+            {% notifications_unread as unread_count %}
+            <div class="panel-heading">Unread notifications <span id="unread_count" class="badge">{{ unread_count }}</span></div>
+            <div class="panel-body">
+                <div class="row">
+                    <div class="col-md-2">
+                        <a id="send-notification-button" type="button" class="btn btn-default btn-block">Send Notification</a>
+                        <div class="send-notification-popover">
+                            <form id="send-notification-form" role="form">
+                                {% csrf_token %}
+                                <div class="form-group">
+                                    <label for="recipient_username">Username</label>
+                                    <input type="text" class="form-control" id="recipient_username" name="recipient_username" placeholder="Recipient username">
+                                </div>
+                                <div class="form-group">
+                                    <label for="verb">Verb</label>
+                                    <input type="text" class="form-control" id="verb" name="verb" placeholder="Verb">
+                                </div>
+                                <button class="btn btn-default send-notification-form-submit">Submit</button>
+                            </form>
+                        </div>
+                    </div>
+                    <div class="col-md-2"><a id="mark-as-read-button" class="btn btn-default btn-block">Mark as read</a></div>
+                </div>
+                <div class="row">
+                    <div class="col-md-12">
+                    </div>
+                </div>
+            </div>
+            <table id="notifications-table" class="table table-bordered">
+                <thead>
+                    <tr>
+                        <th>Timestamp</th>
+                        <th>Recipient</th>
+                        <th>Actor</th>
+                        <th>Verb</th>
+                        <th>Action Object</th>
+                        <th>Target</th>
+                        <th>Description</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for notification in notifications %}
+                    <tr>
+                        <td>{{ notification.timestamp|date:"c" }}</td>
+                        <td>{{ notification.recipient|default:"" }}</td>
+                        <td>{{ notification.actor|default:"" }}</td>
+                        <td>{{ notification.verb|default:"" }}</td>
+                        <td>{{ notification.action_object|default:"" }}</td>
+                        <td>{{ notification.target|default:"" }}</td>
+                        <td>{{ notification.description|default:"" }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</body>
+</html>
